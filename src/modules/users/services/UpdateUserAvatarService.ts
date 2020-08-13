@@ -1,21 +1,31 @@
-import { getRepository } from 'typeorm';
 import path from 'path';
 import fs from 'fs';
 import uploadConfig from '@config/upload';
+import { injectable, inject } from 'tsyringe';
 
 import AppError from '@shared/errors/AppError';
+import IStorageProvider from '@shared/container/providers/StorageProvider/models/IStorageProvider';
+import IUsersRepository from '../repositories/IUsersRepositories';
+
 import User from '../infra/typeorm/entities/User';
 
-interface Request {
+interface IRequest {
     user_id: string;
     avatarFilename: string;
 }
 
+@injectable()
 class UpdateUserAvatarService {
-    public async execute({ user_id, avatarFilename }: Request): Promise<User> {
-        const usersRepository = getRepository(User);
+    constructor(
+        @inject('UsersRepository')
+        private usersRepository: IUsersRepository,
 
-        const user = await usersRepository.findOne(user_id);
+        @inject('StorageProvider')
+        private storageProvider: IStorageProvider,
+    ) {}
+
+    public async execute({ user_id, avatarFilename }: IRequest): Promise<User> {
+        const user = await this.usersRepository.findById(user_id);
 
         if (!user) {
             throw new AppError(
@@ -25,23 +35,14 @@ class UpdateUserAvatarService {
         }
 
         if (user.avatar) {
-            const userAvatarFilePath = path.join(
-                uploadConfig.directory,
-                user.avatar,
-            );
-
-            const userAvarFileExists = await fs.promises.stat(
-                userAvatarFilePath,
-            );
-
-            if (userAvarFileExists) {
-                await fs.promises.unlink(userAvatarFilePath);
-            }
+            await this.storageProvider.deleteFile(user.avatar);
         }
 
-        user.avatar = avatarFilename;
+        const fileName = await this.storageProvider.saveFile(avatarFilename);
 
-        await usersRepository.save(user);
+        user.avatar = fileName;
+
+        await this.usersRepository.save(user);
 
         return user;
     }
